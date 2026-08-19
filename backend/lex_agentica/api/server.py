@@ -1,7 +1,9 @@
+import asyncio
+import json
 import time
 import uuid
 from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -17,8 +19,38 @@ from lex_agentica.core.models import (
 from lex_agentica.core.underwriter import AutonomousUnderwriter, UnderwritingAssessment
 from lex_agentica.memory.engine import SibylMemoryEngine
 from lex_agentica.onchain.escrow_client import BaseEscrowClient, BaseOnchainTxReceipt
+from lex_agentica.simulator.economy_simulation import AutonomousEconomySimulator, SimulationStatus
 from lex_agentica.simulator.litmus_test import LitmusBenchmarkRunner
 from lex_agentica.virtuals.acp import VirtualsACPCoordinator, ACPMessageType
+
+
+class ConnectionManager:
+    """Manages active WebSocket connections for real-time live event streaming."""
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    def broadcast(self, message: Dict[str, Any]):
+        """Synchronously schedules async broadcast across all connected clients."""
+        dead_connections = []
+        for connection in list(self.active_connections):
+            try:
+                # Use event loop if running
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(connection.send_text(json.dumps(message)))
+            except Exception:
+                dead_connections.append(connection)
+
+        for dc in dead_connections:
+            self.disconnect(dc)
 
 
 app = FastAPI(
@@ -37,12 +69,23 @@ app.add_middleware(
 )
 
 # Global Singletons
+ws_manager = ConnectionManager()
 memory_engine = SibylMemoryEngine()
 arbiter = AutonomousArbiter(memory_engine)
 underwriter = AutonomousUnderwriter(memory_engine)
 escrow_client = BaseEscrowClient()
 acp_coordinator = VirtualsACPCoordinator()
 litmus_runner = LitmusBenchmarkRunner()
+
+# Autonomous Economy Simulator Singleton
+simulator = AutonomousEconomySimulator(
+    memory_engine=memory_engine,
+    arbiter=arbiter,
+    underwriter=underwriter,
+    escrow_client=escrow_client,
+    acp_coordinator=acp_coordinator,
+    broadcast_callback=lambda event: ws_manager.broadcast(event)
+)
 
 
 class CreateMandateRequest(BaseModel):
@@ -72,9 +115,27 @@ class AssessRiskRequest(BaseModel):
     category: str = "GENERAL"
 
 
+class SimulationControlRequest(BaseModel):
+    interval_seconds: float = 3.5
+
+
+@app.websocket("/ws/live")
+async def websocket_live_feed(websocket: WebSocket):
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            # Keep-alive heartbeat
+            data = await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception:
+        ws_manager.disconnect(websocket)
+
+
 @app.get("/api/status")
 def get_system_status():
     counts = memory_engine.get_tier_counts()
+    sim_status = simulator.get_status()
     return {
         "status": "OPERATIONAL",
         "system_name": "Lex Agentica",
@@ -90,7 +151,9 @@ def get_system_status():
         },
         "memory_tier_counts": counts,
         "total_records": sum(counts.values()),
-        "base_sepolia_contract": escrow_client.contract_address
+        "base_sepolia_contract": escrow_client.contract_address,
+        "simulation_running": sim_status.is_running,
+        "total_events_generated": sim_status.total_events_generated
     }
 
 
@@ -180,6 +243,14 @@ def create_mandate(req: CreateMandateRequest):
         payload={"mandate_id": mandate_id, "amount_usdc": req.amount_usdc, "tx_hash": tx_receipt.tx_hash}
     )
     
+    event_data = {
+        "event_type": "MANDATE_CREATED",
+        "description": f"New mandate {mandate_id} created for {req.worker_agent_id} (${req.amount_usdc:,.0f} USDC).",
+        "mandate": mandate.model_dump(),
+        "onchain_receipt": tx_receipt.model_dump()
+    }
+    ws_manager.broadcast(event_data)
+    
     return {
         "mandate": mandate,
         "risk_assessment": risk_assessment,
@@ -237,6 +308,14 @@ def adjudicate_dispute(req: FileDisputeRequest):
         defendant_award=ruling.defendant_award_usdc
     )
     
+    event_data = {
+        "event_type": "DISPUTE_SLASHED",
+        "description": f"Docket {ruling.case_id} settled on Base Sepolia. {ruling.slash_percentage}% slashed.",
+        "ruling": ruling.model_dump(),
+        "onchain_receipt": onchain_receipt.model_dump()
+    }
+    ws_manager.broadcast(event_data)
+    
     return {
         "ruling": ruling,
         "onchain_receipt": onchain_receipt,
@@ -259,7 +338,31 @@ def run_litmus_test(scenario: str = Query("RECIDIVISM")) -> LitmusTestReport:
     return litmus_runner.run_benchmark(scenario_type=scenario)
 
 
+@app.post("/api/simulation/start")
+def start_simulation(req: SimulationControlRequest = SimulationControlRequest()):
+    simulator.start(interval_seconds=req.interval_seconds)
+    return {"status": "SUCCESS", "simulation_running": True, "interval_seconds": req.interval_seconds}
+
+
+@app.post("/api/simulation/stop")
+def stop_simulation():
+    simulator.stop()
+    return {"status": "SUCCESS", "simulation_running": False}
+
+
+@app.get("/api/simulation/status")
+def get_simulation_status() -> SimulationStatus:
+    return simulator.get_status()
+
+
+@app.post("/api/simulation/step")
+def step_simulation():
+    step_result = simulator.step()
+    return {"status": "SUCCESS", "step_result": step_result}
+
+
 @app.post("/api/memory/reset")
 def reset_memory():
+    simulator.stop()
     memory_engine.reset_to_clean_state()
     return {"status": "SUCCESS", "message": "Sibyl 5-Tier Memory reset to initial baseline state."}

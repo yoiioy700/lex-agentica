@@ -156,3 +156,27 @@ class TestApiAndIntegration:
         rep_3 = runner.run_benchmark("CONTAGION")
         assert rep_3.gate_passed is True
         assert rep_3.capital_loss_prevented_usdc >= 20000.0
+
+    def test_economy_simulation_endpoints(self):
+        # 1. Check initial simulation status
+        status_resp = client.get("/api/simulation/status")
+        assert status_resp.status_code == 200
+        assert "is_running" in status_resp.json()
+
+        # 2. Trigger single step
+        step_resp = client.post("/api/simulation/step")
+        assert step_resp.status_code == 200
+        step_data = step_resp.json()
+        assert step_data["status"] == "SUCCESS"
+        assert "step_result" in step_data
+        assert step_data["step_result"]["event_type"] in ["INSTANT_PAYOUT", "DISPUTE_SLASHED"]
+
+        # 3. Start background simulation
+        start_resp = client.post("/api/simulation/start", json={"interval_seconds": 1.0})
+        assert start_resp.status_code == 200
+        assert start_resp.json()["simulation_running"] is True
+
+        # 4. Stop simulation
+        stop_resp = client.post("/api/simulation/stop")
+        assert stop_resp.status_code == 200
+        assert stop_resp.json()["simulation_running"] is False
