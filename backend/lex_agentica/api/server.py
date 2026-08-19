@@ -255,8 +255,8 @@ def get_virtuals_messages():
 
 
 @app.post("/api/litmus/run")
-def run_litmus_test() -> LitmusTestReport:
-    return litmus_runner.run_benchmark()
+def run_litmus_test(scenario: str = Query("RECIDIVISM")) -> LitmusTestReport:
+    return litmus_runner.run_benchmark(scenario_type=scenario)
 
 
 @app.post("/api/memory/reset")

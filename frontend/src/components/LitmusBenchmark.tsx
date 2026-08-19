@@ -3,17 +3,39 @@ import { ShieldAlert, ShieldCheck, Play, CheckCircle2, XCircle, Zap, Cpu } from 
 import type { LitmusTestReport } from '../types';
 
 interface LitmusBenchmarkProps {
-  onRunLitmusTest: () => Promise<LitmusTestReport>;
+  onRunLitmusTest: (scenario: string) => Promise<LitmusTestReport>;
 }
 
+const SCENARIOS = [
+  {
+    id: 'RECIDIVISM',
+    name: '1. Recidivist Exploit & Capital Shield',
+    desc: 'Malicious payload in Session 1 → Fresh session underwriter enforces 200% margin ($15k USDC saved)',
+    badge: 'Statute A2A-§403'
+  },
+  {
+    id: 'PRECEDENT',
+    name: '2. Stare Decisis Precedent Recall',
+    desc: 'Recall ARCHIVE landmark case law across cold sessions for deterministic adjudication',
+    badge: 'Statute A2A-§401'
+  },
+  {
+    id: 'CONTAGION',
+    name: '3. Multi-Agent Contagion & Solvency',
+    desc: 'Network-wide WARM tier dossier updates prevent systemic default contagion ($37k USDC saved)',
+    badge: 'Statute A2A-§405'
+  }
+];
+
 export const LitmusBenchmark: React.FC<LitmusBenchmarkProps> = ({ onRunLitmusTest }) => {
+  const [selectedScenario, setSelectedScenario] = useState<string>('RECIDIVISM');
   const [isRunning, setIsRunning] = useState(false);
   const [report, setReport] = useState<LitmusTestReport | null>(null);
 
   const handleRunTest = async () => {
     setIsRunning(true);
     try {
-      const res = await onRunLitmusTest();
+      const res = await onRunLitmusTest(selectedScenario);
       setReport(res);
     } catch (e) {
       console.error(e);
@@ -46,8 +68,44 @@ export const LitmusBenchmark: React.FC<LitmusBenchmarkProps> = ({ onRunLitmusTes
             style={{ padding: '0.7rem 1.35rem', fontSize: '0.85rem', fontWeight: 700 }}
           >
             <Play size={16} />
-            {isRunning ? 'Executing Cold-Start Stress Test...' : 'Run Litmus Benchmark'}
+            {isRunning ? 'Executing Cold-Start Stress Test...' : 'Run Selected Scenario'}
           </button>
+        </div>
+
+        {/* Scenario Selector Tabs */}
+        <div>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '0.5rem' }}>
+            Select Load-Bearing Memory Stress Scenario:
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0.65rem' }}>
+            {SCENARIOS.map((sc) => {
+              const isSelected = selectedScenario === sc.id;
+              return (
+                <div
+                  key={sc.id}
+                  onClick={() => setSelectedScenario(sc.id)}
+                  className="panel-interactive"
+                  style={{
+                    cursor: 'pointer',
+                    padding: '0.85rem 1rem',
+                    borderRadius: 'var(--radius-md)',
+                    background: isSelected ? 'var(--bg-surface-raised)' : 'var(--bg-surface-inset)',
+                    border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.3rem',
+                    boxShadow: isSelected ? '0 0 14px rgba(56, 189, 248, 0.2)' : 'none'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <strong style={{ fontSize: '0.84rem', color: isSelected ? '#ffffff' : 'var(--text-main)' }}>{sc.name}</strong>
+                    <span className="tag tag-cyan" style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}>{sc.badge}</span>
+                  </div>
+                  <p style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', lineHeight: '1.35' }}>{sc.desc}</p>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {/* Litmus Gate Criteria Badges */}
@@ -136,9 +194,12 @@ export const LitmusBenchmark: React.FC<LitmusBenchmarkProps> = ({ onRunLitmusTes
 
           {/* Step by Step Execution Breakdown */}
           <div className="panel" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.6rem' }}>
-              Execution Divergence Audit Trail
-            </h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.6rem' }}>
+              <h3 style={{ fontSize: '1.05rem', fontWeight: 700 }}>
+                Execution Divergence Audit Trail: {report.scenario_title}
+              </h3>
+              <span className="tag tag-neutral font-mono">{report.test_id}</span>
+            </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
               {report.steps.map((step, idx) => (
@@ -182,7 +243,7 @@ export const LitmusBenchmark: React.FC<LitmusBenchmarkProps> = ({ onRunLitmusTes
           </div>
           <strong style={{ fontSize: '0.95rem', color: 'var(--text-secondary)' }}>Litmus Benchmark Ready</strong>
           <p style={{ fontSize: '0.82rem', maxWidth: '440px', lineHeight: '1.5' }}>
-            Click <strong>"Run Litmus Benchmark"</strong> above to launch the automated Cold-Start stress test and prove memory criticality.
+            Select a scenario above and click <strong>"Run Selected Scenario"</strong> to launch the automated Cold-Start stress test and prove memory criticality.
           </p>
         </div>
       )}

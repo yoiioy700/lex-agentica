@@ -138,107 +138,51 @@ export function App() {
   };
 
   const handleAdjudicate = async (payload: any) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/disputes/adjudicate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) {
-        const data = await res.json();
-        fetchData();
-        return data;
-      }
-    } catch (e) {
-      console.warn('Backend dispute API unreachable, using resilient client arbitration', e);
-    }
-    
-    // Resilient fallback simulation
-    const isMalicious = Boolean(payload.has_malicious_payload);
-    const isLatency = (payload.actual_latency_ms || 0) > 5000;
-    const isPartial = (payload.actual_accuracy_pct || 100) < 90;
-    const isFrivolous = payload.alleged_breach_code === 'A2A-§404';
-
-    let rulingType: any = 'PLAINTIFF_FULL_REFUND';
-    let slashPct = 100;
-    let rationale = 'Arbitration panel determined counterparty committed material contract breach.';
-    let precedents = ['PRECEDENT-CASE-2026-088'];
-
-    if (isMalicious) {
-      rulingType = 'PLAINTIFF_FULL_REFUND';
-      slashPct = 100;
-      rationale = 'Defendant payload contained unauthorized bytecode probing and prompt injection. Total forfeiture pursuant to Statute A2A-§403.';
-      precedents = ['PRECEDENT-CASE-2026-088: Nexus-Oracle vs Apex-Fund'];
-    } else if (isLatency) {
-      rulingType = 'PLAINTIFF_FULL_REFUND';
-      slashPct = 100;
-      rationale = 'Oracle price delivery was stale by 14,200ms (SLA limit: 2,000ms). Full refund pursuant to Statute A2A-§401.';
-      precedents = ['PRECEDENT-CASE-2026-088: Nexus-Oracle Stale Eth/Usd Feeds'];
-    } else if (isPartial) {
-      rulingType = 'PARTIAL_SPLIT';
-      slashPct = 50;
-      rationale = 'Worker delivered 80% acceptable output pipelines. 50% pro-rata fee release awarded pursuant to Statute A2A-§402.';
-      precedents = ['PRECEDENT-CASE-2026-094: Synthetix-Coder vs Quant-LLC'];
-    } else if (isFrivolous) {
-      rulingType = 'DEFENDANT_FULL_PAYOUT';
-      slashPct = 0;
-      rationale = 'Plaintiff claim dismissed with prejudice. Worker met 100% cryptographic SLA parameters pursuant to Statute A2A-§404.';
-      precedents = [];
-    }
-
-    const plaintiffAward = (2500 * slashPct) / 100;
-    const defendantAward = 2500 - plaintiffAward;
-
-    return {
-      ruling: {
-        case_id: `CASE-${Date.now().toString().slice(-6)}`,
-        mandate_id: payload.mandate_id,
-        ruling_type: rulingType,
-        slash_percentage: slashPct,
-        plaintiff_award_usdc: plaintiffAward,
-        defendant_award_usdc: defendantAward,
-        legal_rationale: rationale,
-        cited_statutes: [payload.alleged_breach_code, 'A2A-§405'],
-        cited_precedents: precedents,
-        adjudicated_at: new Date().toISOString()
-      },
-      onchain_receipt: {
-        tx_hash: `0x7f9e8374dff${Date.now().toString(16)}bc001712a4589d1469D5b1E697334701235Eb7`,
-        block_number: 18942150,
-        chain_id: 84532,
-        network_name: 'Base Sepolia',
-        contract_address: '0x8453c9E412A4589d1469D5b1E697334701235Eb7',
-        event_name: 'EscrowDisputeSettled',
-        gas_used: 84250,
-        explorer_url: 'https://sepolia.basescan.org',
-        timestamp: new Date().toISOString()
-      },
-      updated_worker_dossier: null
-    };
-  };
-
-  const handleAssessRisk = async (agentId: string, amount: number) => {
-    const res = await fetch(`${API_BASE}/api/underwrite`, {
+    const res = await fetch(`${API_BASE}/api/disputes/adjudicate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent_id: agentId, amount_usdc: amount })
+      body: JSON.stringify(payload)
     });
     if (!res.ok) {
-      throw new Error('Failed to assess risk');
-    }
-    return await res.json();
-  };
-
-  const handleRunLitmusTest = async (): Promise<LitmusTestReport> => {
-    const res = await fetch(`${API_BASE}/api/litmus/run`, {
-      method: 'POST'
-    });
-    if (!res.ok) {
-      throw new Error('Failed to run litmus test');
+      throw new Error(`Adjudication failed: backend returned ${res.status}. Memory-backed arbitration requires the Sibyl backend to be running.`);
     }
     const data = await res.json();
     fetchData();
     return data;
+  };
+
+  const handleAssessRisk = async (agentId: string, amount: number) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/underwrite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent_id: agentId, amount_usdc: amount })
+      });
+      if (!res.ok) {
+        throw new Error(`Underwriting failed: ${res.status}`);
+      }
+      return await res.json();
+    } catch (e) {
+      console.error('Credit desk requires backend with Sibyl Memory:', e);
+      throw e;
+    }
+  };
+
+  const handleRunLitmusTest = async (scenario: string = 'RECIDIVISM'): Promise<LitmusTestReport> => {
+    try {
+      const res = await fetch(`${API_BASE}/api/litmus/run?scenario=${scenario}`, {
+        method: 'POST'
+      });
+      if (!res.ok) {
+        throw new Error(`Litmus benchmark failed: ${res.status}`);
+      }
+      const data = await res.json();
+      fetchData();
+      return data;
+    } catch (e) {
+      console.error('Litmus test requires backend with Sibyl Memory:', e);
+      throw e;
+    }
   };
 
   const handleResetMemory = async () => {
